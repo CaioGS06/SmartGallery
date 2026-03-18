@@ -1,98 +1,201 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import FaceDetection, { Face } from '@react-native-ml-kit/face-detection';
+import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Button, FlatList, Image, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function GalleryScreen() {
+  const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
+  // We use "any" here because ImagePicker and MediaLibrary return slightly different objects,
+  // but both will have a 'uri', 'width', and 'height'
+  const [selectedImage, setSelectedImage] = useState<any>(null);
+
+  const [faces, setFaces] = useState<Face[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
+  const { width: screenWidth } = useWindowDimensions(); // Gets the exact width of your phone screen
+
+  useEffect(() => {
+    async function getPhotos() {
+      if (permissionResponse?.status !== 'granted') {
+        setLoading(false);
+        return;
+      }
+      try {
+        const media = await MediaLibrary.getAssetsAsync({
+          first: 60,
+          mediaType: 'photo',
+          sortBy: ['creationTime'],
+        });
+        setAssets(media.assets);
+      } catch (error) {
+        console.error("Error loading photos:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    if (permissionResponse?.status === 'granted') getPhotos();
+  }, [permissionResponse]);
+
+  // NEW: Function to open the system picker for any folder
+  const pickSystemImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      setSelectedImage(result.assets[0]);
+      setFaces([]); // Clear old faces
+    }
+  };
+
+  const analyzePhoto = async () => {
+    if (!selectedImage) return;
+    setAnalyzing(true);
+
+    try {
+      const detectedFaces = await FaceDetection.detect(selectedImage.uri, {
+        landmarkMode: 'none',
+        contourMode: 'none',
+        classificationMode: 'none',
+      });
+      setFaces(detectedFaces);
+    } catch (error) {
+      console.error("AI Analysis failed:", error);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Calculates the layout for the modal image to perfectly map the boxes
+  const renderImageWithBoxes = () => {
+    if (!selectedImage) return null;
+
+    // 1. Calculate the aspect ratio so the image displays perfectly without cropping
+    const imgWidth = selectedImage.width || screenWidth;
+    const imgHeight = selectedImage.height || screenWidth;
+    const aspectRatio = imgWidth / imgHeight;
+
+    // 2. Calculate our scale factor
+    const scale = screenWidth / imgWidth;
+
+    return (
+      <View style={{ width: screenWidth, height: screenWidth / aspectRatio }}>
         <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+          source={{ uri: selectedImage.uri }}
+          style={{ width: '100%', height: '100%' }}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        {/* 3. Draw the boxes using the scale factor */}
+        {faces.map((face, index) => (
+          <View
+            key={index}
+            style={{
+              position: 'absolute',
+              borderWidth: 2,
+              borderColor: 'red',
+              left: face.frame.left * scale,
+              top: face.frame.top * scale,
+              width: face.frame.width * scale,
+              height: face.frame.height * scale,
+            }}
+          />
+        ))}
+      </View>
+    );
+  };
+
+  if (!permissionResponse || permissionResponse.status !== 'granted') {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.text}>We need permission to access your gallery.</Text>
+        <Button title="Grant Permission" onPress={requestPermission} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* NEW: Button to trigger the system picker */}
+      <View style={styles.header}>
+        <Button title="Browse All Folders" onPress={pickSystemImage} />
+      </View>
+
+      {loading ? (
+        <ActivityIndicator size="large" color="#0000ff" />
+      ) : (
+        <FlatList
+          data={assets}
+          keyExtractor={(item) => item.id}
+          numColumns={3}
+          renderItem={({ item }) => (
+            <Pressable
+              style={styles.imageContainer}
+              onPress={() => {
+                setSelectedImage(item);
+                setFaces([]);
+              }}
+            >
+              <Image source={{ uri: item.uri }} style={styles.image} />
+            </Pressable>
+          )}
+        />
+      )}
+
+      <Modal
+        visible={selectedImage !== null}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setSelectedImage(null)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.imageWrapper}>
+            {renderImageWithBoxes()}
+          </View>
+
+          <View style={styles.modalControls}>
+            {analyzing ? (
+              <ActivityIndicator size="large" color="ffffff" />
+            ) : (
+              <Button title="Analyze with AI" onPress={analyzePhoto} />
+            )}
+
+            {faces.length > 0 && (
+              <Text style={{ color: 'white', marginTop: 10, textAlign: 'center' }}>
+                Faces found: {faces.length}
+              </Text>
+            )}
+
+            <View style={{ height: 10 }} />
+            <Button
+              title="Close"
+              color="red"
+              onPress={() => {
+                setSelectedImage(null);
+                setFaces([]);
+              }}
+            />
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: { padding: 15, paddingTop: 60, backgroundColor: '#f0f0f0' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  text: { marginBottom: 16, fontSize: 16, textAlign: 'center' },
+  imageContainer: { flex: 1 / 3, aspectRatio: 1, margin: 1 },
+  image: { flex: 1 },
+  modalContainer: { flex: 1, backgroundColor: '#000' },
+  imageWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  modalControls: { padding: 20, backgroundColor: '#111', paddingBottom: 40 }
 });
