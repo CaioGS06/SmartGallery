@@ -1,112 +1,140 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import * as SQLite from 'expo-sqlite';
+import { useCallback, useState } from 'react';
+import { Button, FlatList, Image, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+const db = SQLite.openDatabaseSync('smartgallery.db');
 
-export default function TabTwoScreen() {
+export default function ExploreScreen() {
+  const [analyzedPhotos, setAnalyzedPhotos] = useState<any[]>([]);
+  const [selectedImage, setSelectedImage] = useState<any | null>(null);
+  const [faces, setFaces] = useState<any[]>([]);
+
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchFaces();
+    }, [])
+  );
+
+  const fetchFaces = async () => {
+    try {
+      const records = await db.getAllAsync('SELECT * FROM photos WHERE face_count > 0 ORDER BY analyzed_at DESC');
+      setAnalyzedPhotos(records as any[]);
+    } catch (error) {
+      console.error("Failed to fetch from DB:", error);
+    }
+  };
+
+  const handleSelectImage = (item: any) => {
+    setSelectedImage(item);
+
+    if (item.faces_data) {
+      setFaces(JSON.parse(item.faces_data));
+    } else {
+      setFaces([]);
+    }
+  };
+
+  const renderImageWithBoxes = () => {
+    if (!selectedImage || !selectedImage.image_width) return null;
+
+    // Read the exact dimensions we saved in SQLite during the scan
+    const imgWidth = selectedImage.image_width || screenWidth;
+    const imgHeight = selectedImage.image_height || screenWidth;
+
+    const maxAvailableHeight = screenHeight - 200;
+
+    const scaleWidth = screenWidth / imgWidth;
+    const scaleHeight = maxAvailableHeight / imgHeight;
+    const finalScale = Math.min(scaleWidth, scaleHeight);
+
+    const finalWidth = imgWidth * finalScale;
+    const finalHeight = imgHeight * finalScale;
+
+    return (
+      <View style={{ width: finalWidth, height: finalHeight }}>
+        <Image source={{ uri: selectedImage.uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+        {faces.map((face: any, index: number) => (
+          <View
+            key={index}
+            style={{
+              position: 'absolute',
+              borderWidth: 2,
+              borderColor: 'red',
+              left: face.frame.left * finalScale,
+              top: face.frame.top * finalScale,
+              width: face.frame.width * finalScale,
+              height: face.frame.height * finalScale,
+            }}
+          />
+        ))}
+      </View>
+    );
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Faces Album</Text>
+        <Text style={styles.headerSubtitle}>
+          {analyzedPhotos.length} {analyzedPhotos.length === 1 ? 'photo' : 'photos'} found
+        </Text>
+      </View>
+
+      {analyzedPhotos.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>No faces found yet!</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={analyzedPhotos}
+          keyExtractor={(item) => item.asset_id}
+          numColumns={3}
+          renderItem={({ item }) => (
+            <Pressable style={styles.imageContainer} onPress={() => handleSelectImage(item)}>
+              <Image source={{ uri: item.uri }} style={styles.image} />
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{item.face_count}</Text>
+              </View>
+            </Pressable>
+          )}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+      )}
+
+      {/* The Detail Modal */}
+      <Modal visible={selectedImage !== null} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.imageWrapper}>
+            {renderImageWithBoxes()}
+          </View>
+          <View style={styles.modalControls}>
+            <Text style={{ color: 'white', marginBottom: 15, textAlign: 'center', fontSize: 16, fontWeight: 'bold' }}>
+              Stored Data: {faces.length} {faces.length === 1 ? 'Face' : 'Faces'}
+            </Text>
+            <Button color="red" title="Close" onPress={() => setSelectedImage(null)} />
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: { padding: 20, backgroundColor: '#f0f0f0', alignItems: 'center' },
+  headerTitle: { fontSize: 20, fontWeight: 'bold' },
+  headerSubtitle: { fontSize: 14, color: '#666', marginTop: 4 },
+  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  emptyText: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  imageContainer: { flex: 1 / 3, aspectRatio: 1, margin: 1, position: 'relative' },
+  image: { flex: 1 },
+  badge: { position: 'absolute', bottom: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  badgeText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
+  modalContainer: { flex: 1, backgroundColor: '#000' },
+  imageWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  modalControls: { padding: 20, backgroundColor: '#111', paddingBottom: 40 }
 });
